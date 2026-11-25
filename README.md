@@ -13,7 +13,7 @@ Stereo depth on the Radxa Cubie A7A's NPU: [Fast-ACVNet+](https://github.com/gan
 |---|---|
 | `models/` | ready-to-run `.nb` files (256x192 int8-pcq and int16, 640x384 int8-pcq) |
 | `convert/` | exporter, NPU-friendly model rewrite, ONNX patcher, Acuity scripts, one-shot driver `convert.sh` |
-| `runtime/` | `nb_bench.cpp` (timing/smoke test on the board), helpers to make inputs and compare against float ONNX |
+| `runtime/` | `nb_run.cpp` (standalone VIPLite runner: timing + real inputs), `run_stereo.py` (stereo pair -> disparity picture), helpers to compare against float ONNX |
 
 ## Results (Radxa Cubie A7A, NPU at 1008 MHz, maxdisp 64, top-k 4)
 
@@ -27,7 +27,7 @@ Stereo depth on the Radxa Cubie A7A's NPU: [Fast-ACVNet+](https://github.com/gan
 
 \* Mean absolute difference between the NPU disparity and the float ONNX disparity (same network, float32) over 9 outdoor
 stereo pairs, in pixels of the *model input width*. This measures how faithfully the quantized `.nb` reproduces the float
-model; it is **not** accuracy against ground truth. Times are the NPU run time reported by the VIPLite wrapper (mean of 20+
+model; it is **not** accuracy against ground truth. Times are the NPU run time measured by `nb_run` around cache flush + `vip_run_network` + cache invalidate (mean of 20+
 runs, very stable, p95 within ~0.5 ms of the mean); they do not include camera capture, rectification or your own pre/post-processing.
 
 Recommendation: **int8 per-channel (`pcq`)** is as fast as uint8 and much more accurate; uint8 shows visible spurious
@@ -44,12 +44,15 @@ Input/output contract (all `.nb` here):
   `fx` scaled to the input width (`fx_full * input_width / full_width`).
 * Images must be rectified (a normal stereo pair; epipolar lines horizontal).
 
-Quick test on the board (you need a VIPLite wrapper, see *Runtime* below):
+Quick test on the board. You need the Allwinner VIPLite SDK files (header + `libNBGlinker.so` / `libVIPhal.so`), for example from
+the AWNPU model zoo that goes with the Allwinner/Radxa NPU toolchain: `common/npuruntime/include` and
+`common/npuruntime/lib_linux_aarch64/A733`. They are proprietary and not included here. `nb_run` calls the VIPLite API
+directly, no wrapper library is needed.
 
 ```bash
-cd runtime && AWNN=~/awnn_inference ./build_on_board.sh              # builds ./nb_bench
-export LD_LIBRARY_PATH=$HOME/awnn_inference/install/lib
-./nb_bench -m ../models/fastacv_plus_md64_k4_256x192_int8pcq.nb -n 50          # timing with random input
+cd runtime
+NPU_INC=<zoo>/common/npuruntime/include NPU_LIB=<zoo>/common/npuruntime/lib_linux_aarch64/A733 ./build_on_board.sh   # -> ./nb_run
+./nb_run -m ../models/fastacv_plus_md64_k4_256x192_int8pcq.nb -n 50          # timing with random input
 
 # real images: resizes, converts to RGB, runs the NPU, saves a disparity picture (needs python3 + OpenCV)
 python3 run_stereo.py --model ../models/fastacv_plus_md64_k4_256x192_int8pcq.nb --pair frame.jpg --out result
@@ -58,20 +61,19 @@ python3 run_stereo.py --model ../models/fastacv_plus_md64_k4_256x192_int8pcq.nb 
 # -> result_disp.npy (float32 disparity), result_vis.png (left | colourised disparity)
 ```
 
+`nb_run` options: `-n N` timed runs, `-t S` run for S seconds, `-hz R` pace at R runs/s, `-iK file` raw input K, `-o file`
+write output 0 as float32. It prints min/mean/p50/p95/p99/max latency.
+
 To check a model against the float ONNX on your own images, prepare inputs/reference on the PC with
 `runtime/prep_inputs.py`, run `runtime/run_on_board.sh` on the board, and compare with `runtime/compare_eval.py`.
 
-### Runtime
+### Runtime notes
 
-`nb_bench.cpp` is written against a small C++ `awnn::Session` wrapper over Allwinner's VIPLite
-(`load(path)`, `input_buffer(i, &view)`, `run(&profile)`, `output_tensors(&out)`, header `awnn_inference/session.h`).
-That wrapper is not part of this repo (it embeds vendor sources). If you use another VIPLite binding (for example Allwinner's
-`vpm_run` from the NPU model zoo), the same four steps apply. Two quirks I hit with my wrapper: `input_count()` reports 1 for
-a two-input model (it only probes input 0) but `input_buffer(1, ...)` works; and outputs can only be read as float32, so the
-post-process node (below) must be enabled.
-
-The NPU has one compute core and no preemption. If another model (e.g. a detector) runs on it at the same time, the two
-simply take turns and their latencies add up.
+* `nb_run.cpp` uses only the public VIPLite calls (`vip_init`, `vip_create_network`, `vip_create_buffer`, `vip_prepare_network`,
+  `vip_set_input/output`, `vip_run_network`, `vip_flush_buffer`). It builds with `--disable-new-dtags` so that the library
+  path also covers `libVIPhal.so` (a dependency of `libNBGlinker.so`); alternatively set `LD_LIBRARY_PATH`.
+* The NPU has one compute core and no preemption. If another model (e.g. a detector) runs on it at the same time, the two
+  simply take turns and their latencies add up.
 
 ## Converting it yourself
 

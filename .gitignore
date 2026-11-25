@@ -5,3 +5,4 @@ io/
 out/
 *.ckpt
 *.onnx
+runtime/nb_run

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare NPU outputs with the float ONNX reference.
   python runtime/compare_eval.py --io io --out out --tag pcq --size 256x192
-<out>/NN_<tag>.bin are the float32 disparity maps written by nb_bench -o (one per input pair)."""
+<out>/NN_<tag>.bin are the float32 disparity maps written by nb_run -o (one per input pair)."""
 import argparse, glob, os
 import numpy as np
 ap = argparse.ArgumentParser()

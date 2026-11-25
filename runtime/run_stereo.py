@@ -5,7 +5,7 @@
           --pair frame.jpg                      # side-by-side image (left | right)
   python3 runtime/run_stereo.py --model ... --size 256x192 --left l.png --right r.png --out result
 
-Needs: OpenCV + numpy (python3) and the built `nb_bench` (runtime/build_on_board.sh).
+Needs: OpenCV + numpy (python3) and the built `nb_run` (runtime/build_on_board.sh).
 Images must be rectified. Writes <out>_disp.npy (float32 disparity, pixels of the model input),
 <out>_vis.png (left | colorised disparity) and, if --fx/--baseline are given, prints depth statistics.
 """
@@ -21,8 +21,7 @@ g.add_argument("--pair", help="side-by-side stereo image (left | right)")
 g.add_argument("--left", help="left image (use with --right)")
 ap.add_argument("--right")
 ap.add_argument("--out", default="result", help="output prefix")
-ap.add_argument("--nb-bench", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "nb_bench"))
-ap.add_argument("--awnn", default=os.environ.get("AWNN", os.path.expanduser("~/awnn_inference")), help="dir with install/lib (VIPLite libs)")
+ap.add_argument("--nb-run", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "nb_run"), help="path of the built nb_run")
 ap.add_argument("--runs", type=int, default=10, help="timing runs")
 ap.add_argument("--fx", type=float, help="focal length in pixels of the ORIGINAL image width (rectified)")
 ap.add_argument("--baseline", type=float, help="stereo baseline in metres")
@@ -52,11 +51,10 @@ with tempfile.TemporaryDirectory() as td:
         rgb = cv2.cvtColor(cv2.resize(img, (W, H), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)   # raw uint8 RGB HWC
         p = os.path.join(td, name + ".bin"); rgb.tofile(p); paths.append(p)
     outbin = os.path.join(td, "disp.bin")
-    env = dict(os.environ, LD_LIBRARY_PATH=os.path.join(a.awnn, "install/lib") + ":" + os.environ.get("LD_LIBRARY_PATH", ""))
-    r = subprocess.run([a.nb_bench, "-m", a.model, "-n", str(a.runs), "-i0", paths[0], "-i1", paths[1], "-o", outbin],
-                       capture_output=True, text=True, env=env)
+    r = subprocess.run([a.nb_run, "-m", a.model, "-n", str(a.runs), "-i0", paths[0], "-i1", paths[1], "-o", outbin],
+                       capture_output=True, text=True)
     if r.returncode != 0 or not os.path.exists(outbin):
-        sys.exit("nb_bench failed:\n" + r.stdout[-800:] + r.stderr[-800:])
+        sys.exit("nb_run failed:\n" + r.stdout[-800:] + r.stderr[-800:])
     for line in r.stdout.splitlines():
         if line.startswith("run "):
             print("NPU", line.strip())
