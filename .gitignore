@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+work*/
+io/
+out/
+*.ckpt
+*.onnx
